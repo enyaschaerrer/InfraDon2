@@ -17,6 +17,7 @@ declare interface Post {
 
 // Référence à la base de données
 const storage = ref();
+let offline = ref(false);
 
 // Données stockées
 const postsData = ref<Post[]>([])
@@ -38,16 +39,36 @@ const doc = {
 }
 
 // Initialisation de la base de données
+// const initDatabase = () => {
+//   console.log('=> Connexion à la base de données');
+//   const db = new PouchDB('http://admin:Plkjhuio0825.@localhost:5984/db_infradon2')
+//   if (db) {
+//     console.log("Connecté à la collection : " + db?.name)
+//     storage.value = db
+//   } else {
+//     console.warn('Echec lors de la connexion à la base de données')
+//   }
+// }
+
+
 const initDatabase = () => {
   console.log('=> Connexion à la base de données');
-  const db = new PouchDB('http://admin:Plkjhuio0825.@localhost:5984/db_infradon2')
+  const db = new PouchDB('Posts');
   if (db) {
-    console.log("Connecté à la collection : " + db?.name)
-    storage.value = db
+    console.log('Connecté à la collection : ' + db?.name);
+    storage.value = db;
+    db.replicate.from("http://admin:Plkjhuio0825.@localhost:5984/db_infradon2").then();
+    fetchData();
   } else {
     console.warn('Echec lors de la connexion à la base de données')
   }
 }
+
+
+const replicateDB = () => {
+  storage.value.replicate.to("http://admin:Plkjhuio0825.@localhost:5984/db_infradon2")
+}
+
 
 // Récupération des données + affichage
 // https://pouchdb.com/api.html#batch_fetch
@@ -103,15 +124,44 @@ onMounted(() => {
   console.log('=> Composant initialisé');
   initDatabase();
   fetchData();
-  createDocument(doc);
+  //createDocument(doc);
 });
+
+let sync;
+
+const startSync = () => {
+  sync = PouchDB.sync('db_infradon2', 'http://admin:Plkjhuio0825.@localhost:5984/db_infradon2').on('paused', (err) => {
+    console.log(err);
+  })
+}
+
+const stopSync = () => {
+  sync = PouchDB.sync('db_infradon2', 'http://admin:Plkjhuio0825.@localhost:5984/db_infradon2').cancel();
+  console.log("cancelled")
+}
+
+const handleChange = () => {
+
+  if (!offline) {
+    startSync();
+  } else if (offline) {
+    stopSync();
+  }
+
+}
 
 
 </script>
 
 <template>
   <h1>Fetch Data</h1>
+  <p>Mode offline {{ offline }}</p>
+  <label for="mode" name="mode">Mode offline</label>
+  <input type="checkbox" id="mode" name="mode" v-model="offline" @change="handleChange">
+  <br>
   <button @click="createDocument(doc)">Nouveau Document</button>
+  <br>
+  <button v-if="!offline" id="validate" @click="replicateDB()">Valider les changements</button>
   <article v-for="post in postsData" v-bind:key="(post as any).id">
     <ul>
       <li>
