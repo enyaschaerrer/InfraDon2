@@ -1,9 +1,10 @@
 <script setup lang="ts">
-
 // lien Couch DB: http://127.0.0.1:5984/_utils/#database/db_infradon2/_all_docs
-
 import { onMounted, ref } from 'vue';
 import PouchDB from 'pouchdb';
+import PouchDBFind from 'pouchdb-find'
+
+PouchDB.plugin(PouchDBFind);
 
 declare interface Post {
   _id: string;
@@ -18,9 +19,16 @@ declare interface Post {
 // Référence à la base de données
 const storage = ref();
 let offline = ref(false);
+const sync = ref();
 
 // Données stockées
 const postsData = ref<Post[]>([])
+
+onMounted(() => {
+  console.log('=> Composant initialisé');
+  initDatabase();
+  //fetchData();
+});
 
 // Doc hardcodé
 const doc = {
@@ -38,18 +46,6 @@ const doc = {
   ]
 }
 
-// Initialisation de la base de données
-// const initDatabase = () => {
-//   console.log('=> Connexion à la base de données');
-//   const db = new PouchDB('http://admin:Plkjhuio0825.@localhost:5984/db_infradon2')
-//   if (db) {
-//     console.log("Connecté à la collection : " + db?.name)
-//     storage.value = db
-//   } else {
-//     console.warn('Echec lors de la connexion à la base de données')
-//   }
-// }
-
 
 const initDatabase = () => {
   console.log('=> Connexion à la base de données');
@@ -57,16 +53,68 @@ const initDatabase = () => {
   if (db) {
     console.log('Connecté à la collection : ' + db?.name);
     storage.value = db;
-    db.replicate.from("http://admin:Plkjhuio0825.@localhost:5984/db_infradon2").then();
-    fetchData();
+    storage.value.createIndex({
+      index: {
+        fields: ['post_content']
+      }
+    }).then(console.log("the index has been created!"));
+
+    storage.value.replicate.from("http://admin:Plkjhuio0825.@localhost:5984/db_infradon2")
+    fetchData()
+    if (!offline.value) {
+      startSync();
+    }
+
   } else {
     console.warn('Echec lors de la connexion à la base de données')
   }
 }
 
 
-const replicateDB = () => {
-  storage.value.replicate.to("http://admin:Plkjhuio0825.@localhost:5984/db_infradon2")
+const startSync = () => {
+  if (sync.value) {
+    console.log("sync already running");
+    return;
+  }
+  if (!storage.value) {
+    console.warn('No local DB to sync');
+    return;
+  }
+
+  sync.value = storage.value.sync("http://admin:Plkjhuio0825.@localhost:5984/db_infradon2",
+    {
+      live: true,
+      retry: true
+    })
+    .on('change', (info: any) => {
+      console.log("sync change", info);
+      fetchData();
+    })
+
+  console.log('Sync started');
+}
+
+
+const stopSync = () => {
+  try {
+    sync.value.cancel()
+    sync.value = null
+    console.log('Sync cancelled')
+  } catch (err) {
+    console.error('Error cancelling sync', err)
+  }
+}
+
+
+const handleChange = () => {
+
+  if (!offline.value) {
+    console.log("Mode ONLINE => lancement du sync");
+    startSync();
+  } else {
+    console.log("Mode OFFLINE → arrêt du sync");
+    stopSync();
+  }
 }
 
 
@@ -75,9 +123,11 @@ const replicateDB = () => {
 const fetchData = () => {
   storage.value.allDocs({
     include_docs: true
-  }).then(function (result: any) {
+
+  }).then((result: any) => {
     console.log('=>Données récuperées', result.rows);
     postsData.value = result.rows.map((row: any) => row.doc);
+
   }).catch(function (err: any) {
     console.error('=> Erreur lors de la récupération des données :', err)
   });
@@ -102,6 +152,7 @@ const updateDocument = function (doc: any) {
     .put(doc)
     .then(function (result: any) {
       fetchData();
+      console.log(result);
     })
     .catch(function (err: any) {
       console.log(err);
@@ -114,41 +165,61 @@ const deleteDocument = function (id: string, rev: string) {
     .remove(id, rev)
     .then(function (result: any) {
       fetchData();
+      console.log(result);
     }).catch(function (err: any) {
       console.log(err);
     })
 }
 
 
-onMounted(() => {
-  console.log('=> Composant initialisé');
-  initDatabase();
-  fetchData();
-  //createDocument(doc);
-});
+const generate200Docs = (count = 200) => {
+  const words = ["léa", "inoé", "camilo", "yannis", "sarah", "tanguy", "dylan"];
 
-let sync;
-
-const startSync = () => {
-  sync = PouchDB.sync('db_infradon2', 'http://admin:Plkjhuio0825.@localhost:5984/db_infradon2').on('paused', (err) => {
-    console.log(err);
-  })
-}
-
-const stopSync = () => {
-  sync = PouchDB.sync('db_infradon2', 'http://admin:Plkjhuio0825.@localhost:5984/db_infradon2').cancel();
-  console.log("cancelled")
-}
-
-const handleChange = () => {
-
-  if (!offline) {
-    startSync();
-  } else if (offline) {
-    stopSync();
+  for (let i = 0; i < count; i++) {
+    storage.value.post({
+      title: "Doc " + i,
+      post_content: words[Math.floor(Math.random() * words.length)]
+    });
   }
 
+  fetchData();
+};
+
+
+// const deleteAllDocs = () => {
+//   if (storage.value) {
+//     const result = await storage.value.bulkDocs(storage.value.allDocs());
+//     console.log("Tous les documents ont été supprimés :", result);
+
+//     // Rafraîchir les données affichées
+//     fetchData();
+//   } else {
+//     console.error("Erreur lors de la suppression de tous les documents :", err);
+//   }
+// }
+
+
+const search = (event: Event) => {
+  const value = event.target.value.trim();
+
+  if (!value) {
+    return fetchData();
+  }
+
+  storage.value.find({
+    selector: { post_content: event.target.value }
+  })
+
+    .then((result: any) => {
+      console.log('=> Données récupérées :', result.docs)
+      postsData.value = result.docs;
+
+    })
+    .catch((error: any) => {
+      console.error(error)
+    })
 }
+
 
 
 </script>
@@ -160,8 +231,11 @@ const handleChange = () => {
   <input type="checkbox" id="mode" name="mode" v-model="offline" @change="handleChange">
   <br>
   <button @click="createDocument(doc)">Nouveau Document</button>
+  <button @click="generate200Docs()">Générer 200 documents</button>
+  <!-- <button @click="deleteAllDocs()">Supprimer tous les documents</button> -->
+  <input type="text" placeholder="Search" @keyup.enter="search" class="search">
   <br>
-  <button v-if="!offline" id="validate" @click="replicateDB()">Valider les changements</button>
+  <!-- <button v-if="!offline" id="validate" @click="replicateDB()">Valider les changements</button> -->
   <article v-for="post in postsData" v-bind:key="(post as any).id">
     <ul>
       <li>
