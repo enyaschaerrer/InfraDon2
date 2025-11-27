@@ -31,6 +31,7 @@ declare interface Comment {
 const storage = ref();
 const storageComments = ref();
 let offline = ref(false);
+let syncRunning = false;
 const sync = ref();
 const syncComments = ref();
 const needle = ref();
@@ -62,6 +63,7 @@ const comment = {
 }
 
 
+
 const initDatabase = () => {
   console.log('=> Connexion à la base de données');
 
@@ -77,6 +79,7 @@ const initDatabase = () => {
   }
 
   console.log('Connecté aux collections : ' + db?.name, dbComments?.name);
+
 
   storage.value.createIndex({
     index: {
@@ -107,57 +110,70 @@ const initDatabase = () => {
 }
 
 
+
 const startSync = () => {
-  if (sync.value) {
+  if (syncRunning) {
     console.log("sync already running");
     return;
   }
+
   if (!storage.value) {
     console.warn('No local DB to sync');
     return;
   }
 
-  if (syncComments.value) {
-    console.log("sync already running");
-    return;
-  }
   if (!storageComments.value) {
     console.warn('No local DB to sync');
     return;
   }
+
+  syncRunning = true;
 
   sync.value = storage.value.sync("http://admin:Plkjhuio0825.@localhost:5984/db_infradon2",
     {
       live: true,
       retry: true
     })
-    .on('change', (info: any) => {
-      console.log("sync change", info);
-      fetchData();
+    .on('change', fetchData)
+    .on("paused", (err: any) => {
+      if (offline.value) {
+        console.log("Sync paused because offline");
+      }
     })
+    .on("error", (err: any) => {
+      console.log("Sync error :", err);
+      syncRunning = false;
+    });
 
   syncComments.value = storageComments.value.sync("http://admin:Plkjhuio0825.@localhost:5984/db_infradon2_comments",
     {
       live: true,
       retry: true
     })
-    .on('change', (info: any) => {
-      console.log("sync change", info);
-      fetchData();
-    })
+    .on('change', fetchData)
+    .on("error", () => {
+      syncRunning = false;
+    });
 
   console.log('Sync started');
 }
 
 
 const stopSync = () => {
+  if (!syncRunning) return;
+
   try {
-    sync.value.cancel()
-    sync.value = null
+    if (sync.value) {
+      sync.value.cancel()
+      sync.value = null
+    }
 
-    syncComments.value.cancel()
-    syncComments.value = null
+    if (syncComments.value) {
+      syncComments.value.cancel()
+      syncComments.value = null
+    }
 
+    syncRunning = false;
     console.log('Sync cancelled')
 
   } catch (err) {
@@ -168,7 +184,7 @@ const stopSync = () => {
 
 const handleChange = () => {
   if (!offline.value) {
-    console.log("Mode ONLINE => lancement du sync");
+    console.log("Mode ONLINE → lancement du sync");
     startSync();
   } else {
     console.log("Mode OFFLINE → arrêt du sync");
@@ -191,7 +207,7 @@ const fetchData = () => {
     console.error('=> Erreur lors de la récupération des données :', err)
   });
 
-  // PAS SUR
+  
   storageComments.value.allDocs({
     include_docs: true
 
@@ -219,6 +235,7 @@ const createDocument = function (doc: any) {
 // Modification d'un document
 const updateDocument = function (doc: any) {
   doc.post_name = needle.value;
+  needle.value = '';
   storage.value
     .put(doc)
     .then(function (result: any) {
@@ -257,7 +274,7 @@ const generate200Docs = (count = 200) => {
 };
 
 
-const search = (event: Event) => {
+const search = (event: any) => {
   const value = event.target.value.trim();
 
   if (!value) {
@@ -314,6 +331,7 @@ const addComment = function (c: any, post_id: any) {
 // Modification d'un document
 const updateComment = function (c: any) {
   c.comment_content = needleComment.value;
+  needleComment.value = '';
   storageComments.value
     .put(c)
     .then(function (result: any) {
@@ -366,21 +384,21 @@ const getComments = (postId: any) => {
         <p>{{ post.likes }}</p>
 
         <label for="needle">Editer le post</label>
-        <input type="text" name="needle" v-model="needle" @click="updateDocument(post)">
+        <input type="text" name="needle" v-model="needle" @keyup.enter="updateDocument(post)">
 
         <button @click="deleteDocument(post._id, post._rev)">Supprimer le document</button>
         <button @click="handleLike(post)">Liker le document</button>
         <button @click="addComment(comment, post._id)">Nouveau commentaire</button>
 
 
-        <article v-for="comment in getComments(post._id)" v-bind:key="(comment as any).id">
+        <article v-for="comment in getComments(post._id)" v-bind:key="(comment as any)._id">
 
           <ul>
             <li>
               <h2>{{ comment.comment_content }}</h2>
 
               <label for="needleComments">Editer le commentaire</label>
-              <input type="text" name="needleComments" v-model="needleComment" @click="updateComment(comment)">
+              <input type="text" name="needleComments" v-model="needleComment" @keyup.enter="updateComment(comment)">
               <button @click="deleteComment(comment._id, comment._rev)">Supprimer le commentaire</button>
             </li>
           </ul>
