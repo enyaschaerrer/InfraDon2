@@ -34,8 +34,8 @@ let offline = ref(false);
 let syncRunning = false;
 const sync = ref();
 const syncComments = ref();
-const needle = ref();
-const needleComment = ref();
+const needle = ref([]);
+const needleComment = ref([]);
 
 
 // Données stockées
@@ -80,12 +80,18 @@ const initDatabase = () => {
 
   console.log('Connecté aux collections : ' + db?.name, dbComments?.name);
 
-
+  // index nom du post
   storage.value.createIndex({
     index: {
-      fields: ['post_content']
+      fields: ['post_name']
     }
   }).then(console.log("the index has been created!"));
+
+
+  // index likes
+  storage.value.createIndex({
+    index: { fields: ['likes'] }
+  }).then(() => console.log("Index likes created"));
 
 
   // RÉPLICATION POSTS
@@ -196,29 +202,36 @@ const handleChange = () => {
 // Récupération des données + affichage
 // https://pouchdb.com/api.html#batch_fetch
 const fetchData = () => {
-  storage.value.allDocs({
-    include_docs: true
 
-  }).then((result: any) => {
-    console.log('=>Données récuperées', result.rows);
-    postsData.value = result.rows.map((row: any) => row.doc).filter(p => !(p._id.startsWith("_design")));
+  if (!storage.value) return;
 
-  }).catch(function (err: any) {
-    console.error('=> Erreur lors de la récupération des données :', err)
-  });
-
-  
-  storageComments.value.allDocs({
-    include_docs: true
-
-  }).then((result: any) => {
-    console.log('=>Données récuperées', result.rows);
-    commentsData.value = result.rows.map((row: any) => row.doc);
-
-  }).catch(function (err: any) {
-    console.error('=> Erreur lors de la récupération des données :', err)
+  storage.value.find({
+    selector: {
+      likes: { $gte: 0 }  
+    },
+    sort: [{ likes: "desc" }]
   })
+    .then((result: any) => {
+      console.log('=> Posts récupérés triés par likes :', result.docs);
+      postsData.value = result.docs.filter(d => !(d._id.startsWith("_design")));
+    })
+    .catch((err: any) => {
+      console.error('=> Erreur lors de la récupération des posts triés :', err);
+    });
+
+  // COMMENTS
+  if (!storageComments.value) return;
+
+  storageComments.value.allDocs({ include_docs: true })
+    .then((result: any) => {
+      console.log('=> Commentaires récupérés :', result.rows);
+      commentsData.value = result.rows.map((row: any) => row.doc).filter(c => !(c._id.startsWith("_design")));;;
+    })
+    .catch((err: any) => {
+      console.error('=> Erreur lors de la récupération des commentaires :', err);
+    });
 }
+
 
 // Création d'un document
 const createDocument = function (doc: any) {
@@ -233,9 +246,8 @@ const createDocument = function (doc: any) {
 }
 
 // Modification d'un document
-const updateDocument = function (doc: any) {
-  doc.post_name = needle.value;
-  needle.value = '';
+const updateDocument = function (doc: any, i) {
+  doc.post_name = needle.value[i];
   storage.value
     .put(doc)
     .then(function (result: any) {
@@ -282,7 +294,7 @@ const search = (event: any) => {
   }
 
   storage.value.find({
-    selector: { post_content: event.target.value }
+    selector: { post_name: event.target.value }
   })
 
     .then((result: any) => {
@@ -329,9 +341,8 @@ const addComment = function (c: any, post_id: any) {
 }
 
 // Modification d'un document
-const updateComment = function (c: any) {
-  c.comment_content = needleComment.value;
-  needleComment.value = '';
+const updateComment = function (c: any, i: any) {
+  c.comment_content = needleComment.value[i];
   storageComments.value
     .put(c)
     .then(function (result: any) {
@@ -375,7 +386,7 @@ const getComments = (postId: any) => {
   <input type="text" placeholder="Search" @keyup.enter="search" class="search">
   <br>
   Nombre de post : {{ postsData.length }}
-  <article v-for="post in postsData" v-bind:key="(post as any).id">
+  <article v-for="(post, i) in postsData" v-bind:key="(post as any).id">
     <ul>
       <li>
         <hr>
@@ -384,21 +395,22 @@ const getComments = (postId: any) => {
         <p>{{ post.likes }}</p>
 
         <label for="needle">Editer le post</label>
-        <input type="text" name="needle" v-model="needle" @keyup.enter="updateDocument(post)">
+        <input type="text" name="needle" v-model="needle[i]" @keyup.enter="updateDocument(post, i)">
 
         <button @click="deleteDocument(post._id, post._rev)">Supprimer le document</button>
         <button @click="handleLike(post)">Liker le document</button>
         <button @click="addComment(comment, post._id)">Nouveau commentaire</button>
 
 
-        <article v-for="comment in getComments(post._id)" v-bind:key="(comment as any)._id">
+        <article v-for="(comment, i) in getComments(post._id)" v-bind:key="(comment as any)._id">
 
           <ul>
             <li>
               <h2>{{ comment.comment_content }}</h2>
 
               <label for="needleComments">Editer le commentaire</label>
-              <input type="text" name="needleComments" v-model="needleComment" @keyup.enter="updateComment(comment)">
+              <input type="text" name="needleComments" v-model="needleComment[i]"
+                @keyup.enter="updateComment(comment, i)">
               <button @click="deleteComment(comment._id, comment._rev)">Supprimer le commentaire</button>
             </li>
           </ul>
