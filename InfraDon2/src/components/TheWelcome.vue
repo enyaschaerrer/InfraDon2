@@ -392,7 +392,7 @@ const getComments = (postId: any) => {
         <hr>
         <h2>{{ post.post_name }}</h2>
         <p>{{ post.post_content }}</p>
-        <p>{{ post.likes }}</p>
+        <p>Likes:{{ post.likes }}</p>
 
         <label for="needle">Editer le post</label>
         <input type="text" name="needle" v-model="needle[i]" @keyup.enter="updateDocument(post, i)">
