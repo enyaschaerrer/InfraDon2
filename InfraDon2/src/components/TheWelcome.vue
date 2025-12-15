@@ -14,7 +14,7 @@ declare interface Post {
   attributes: {
     creation_date: any;
   };
-  likes: BigInteger;
+  likes: number;
 }
 
 declare interface Comment {
@@ -277,8 +277,9 @@ const generate200Docs = (count = 200) => {
 
   for (let i = 0; i < count; i++) {
     storage.value.post({
-      title: "Doc " + i,
-      post_content: words[Math.floor(Math.random() * words.length)]
+      post_name: "Doc " + i,
+      post_content: words[Math.floor(Math.random() * words.length)],
+      likes: 0
     });
   }
 
