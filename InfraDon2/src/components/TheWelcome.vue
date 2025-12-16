@@ -207,7 +207,7 @@ const fetchData = () => {
 
   storage.value.find({
     selector: {
-      likes: { $gte: 0 }  
+      likes: { $gte: 0 }
     },
     sort: [{ likes: "desc" }]
   })
@@ -295,7 +295,11 @@ const search = (event: any) => {
   }
 
   storage.value.find({
-    selector: { post_name: event.target.value }
+    selector: {
+      post_name: {
+        $regex: new RegExp(value, 'i') // insensible à la casse
+      }
+    }
   })
 
     .then((result: any) => {
