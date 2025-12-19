@@ -15,6 +15,7 @@ declare interface Post {
     creation_date: any;
   };
   likes: number;
+  _attachments?: {};
 }
 
 declare interface Comment {
@@ -36,6 +37,8 @@ const sync = ref();
 const syncComments = ref();
 const needle = ref([]);
 const needleComment = ref([]);
+let $displayPosts = ref(10);
+let $displayComments = ref(1);
 
 
 // Données stockées
@@ -85,7 +88,7 @@ const initDatabase = () => {
     index: {
       fields: ['post_name']
     }
-  }).then(console.log("the index has been created!"));
+  }).then(console.log("the index on the post name has been created!"));
 
 
   // index likes
@@ -93,11 +96,14 @@ const initDatabase = () => {
     index: { fields: ['likes'] }
   }).then(() => console.log("Index likes created"));
 
+  storageComments.value.createIndex({
+    index: { fields: ['id_post'] }
+  }).then(() => console.log("Index on post linked created"));
 
   // RÉPLICATION POSTS
   storage.value
     .replicate
-    .from("http://admin:Plkjhuio0825.@localhost:5984/db_infradon2")
+    .from("http://admin:Plkjhuio0825.@localhost:5984/posts_db_enyaschaerrer")
     .on("complete", () => {
       console.log("Replication POSTS terminée");
       fetchData();
@@ -107,10 +113,10 @@ const initDatabase = () => {
   // RÉPLICATION COMMENTS
   storageComments.value
     .replicate
-    .from("http://admin:Plkjhuio0825.@localhost:5984/db_infradon2_comments")
+    .from("http://admin:Plkjhuio0825.@localhost:5984/comments_db_enyaschaerrer")
     .on("complete", () => {
       console.log("Replication COMMENTS terminée");
-      fetchData();                 // <-- 100% safe
+      fetchData();
       if (!offline.value) startSync();
     });
 }
@@ -135,7 +141,7 @@ const startSync = () => {
 
   syncRunning = true;
 
-  sync.value = storage.value.sync("http://admin:Plkjhuio0825.@localhost:5984/db_infradon2",
+  sync.value = storage.value.sync("http://admin:Plkjhuio0825.@localhost:5984/posts_db_enyaschaerrer",
     {
       live: true,
       retry: true
@@ -151,7 +157,7 @@ const startSync = () => {
       syncRunning = false;
     });
 
-  syncComments.value = storageComments.value.sync("http://admin:Plkjhuio0825.@localhost:5984/db_infradon2_comments",
+  syncComments.value = storageComments.value.sync("http://admin:Plkjhuio0825.@localhost:5984/comments_db_enyaschaerrer",
     {
       live: true,
       retry: true
@@ -205,11 +211,13 @@ const fetchData = () => {
 
   if (!storage.value) return;
 
+  // et pas un allDocs puisqu'il n'est pas nécessaire de charger tous les documents, mais seulement ceux que l'on veut afficher
   storage.value.find({
     selector: {
       likes: { $gte: 0 }
     },
-    sort: [{ likes: "desc" }]
+    sort: [{ likes: "desc" }],
+    limit: $displayPosts.value
   })
     .then((result: any) => {
       console.log('=> Posts récupérés triés par likes :', result.docs);
@@ -219,13 +227,17 @@ const fetchData = () => {
       console.error('=> Erreur lors de la récupération des posts triés :', err);
     });
 
-  // COMMENTS
+  // COMMENTS A CHANGER
   if (!storageComments.value) return;
-
-  storageComments.value.allDocs({ include_docs: true })
+  storageComments.value.find({
+    selector: {
+      id_post: { $exists: true }
+    },
+    limit: $displayComments.value
+  })
     .then((result: any) => {
-      console.log('=> Commentaires récupérés :', result.rows);
-      commentsData.value = result.rows.map((row: any) => row.doc).filter(c => !(c._id.startsWith("_design")));;;
+      console.log('=> Commentaires récupérés :', result.docs);
+      commentsData.value = result.docs.filter(c => !(c._id.startsWith("_design")));
     })
     .catch((err: any) => {
       console.error('=> Erreur lors de la récupération des commentaires :', err);
@@ -377,6 +389,34 @@ const getComments = (postId: any) => {
   return commentsFiltered;
 }
 
+const selectImg = (event: any, post: Post) => {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  storage.value.putAttachment(post._id, file.name, post._rev, file, file.type)
+
+    .then((result: any) => {
+      console.log('Image attachée avec succès:', result);
+      fetchData();
+    })
+    .catch((err: any) => {
+      console.error('Erreur lors de l\'attachement:', err);
+    });
+}
+
+const deleteImg = (event: any, post: Post) => {
+
+}
+
+const changeDisplayPosts = () => {
+  $displayPosts.value += 10;
+}
+
+const changeDisplayComments = () => {
+  $displayComments.value += 10;
+}
+
+
 
 </script>
 
@@ -404,8 +444,16 @@ const getComments = (postId: any) => {
 
         <button @click="deleteDocument(post._id, post._rev)">Supprimer le document</button>
         <button @click="handleLike(post)">Liker le document</button>
-        <button @click="addComment(comment, post._id)">Nouveau commentaire</button>
 
+        <br>
+
+        <label for="img">Ajouter une image</label>
+        <input type="file" name="img" @change="selectImg($event, post)">
+        <button @click="deleteImg($event, post)">Supprimer l'image attachée</button>
+
+        <br>
+        <button @click="addComment(comment, post._id)">Nouveau commentaire</button>
+        <br>
 
         <article v-for="(comment, i) in getComments(post._id)" v-bind:key="(comment as any)._id">
 
@@ -422,7 +470,12 @@ const getComments = (postId: any) => {
 
         </article>
 
+        <button @click="changeDisplayComments()">Charger plus de commentaires</button>
+
       </li>
     </ul>
   </article>
+  
+      <button @click="changeDisplayPosts()">Charger plus de posts</button>
+
 </template>
