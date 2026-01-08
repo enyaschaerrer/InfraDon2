@@ -24,7 +24,7 @@ declare interface Comment {
   id_post: string;
   comment_content: string;
   attributes: {
-    creation_date: any;
+    creation_date: string;
   };
 }
 
@@ -38,7 +38,9 @@ const syncComments = ref();
 const needle = ref([]);
 const needleComment = ref([]);
 let $displayPosts = ref(10);
-let $displayComments = ref(1);
+
+// si l'id du post est dans le tableau, on affiche tous ses commentaires
+const showAllComments = ref<{ [key: string]: boolean }>({});
 
 
 // Données stockées
@@ -49,7 +51,6 @@ const commentsData = ref<Comment[]>([])
 onMounted(() => {
   console.log('=> Composant initialisé');
   initDatabase();
-  //fetchData();
 });
 
 
@@ -59,12 +60,6 @@ const doc = {
   post_content: "Contenu du post",
   likes: 0
 }
-
-const comment = {
-  id_post: "",
-  comment_content: "ceci est un super commentaire",
-}
-
 
 
 const initDatabase = () => {
@@ -100,6 +95,7 @@ const initDatabase = () => {
     index: { fields: ['id_post'] }
   }).then(() => console.log("Index on post linked created"));
 
+
   // RÉPLICATION POSTS
   storage.value
     .replicate
@@ -122,19 +118,13 @@ const initDatabase = () => {
 }
 
 
-
 const startSync = () => {
   if (syncRunning) {
     console.log("sync already running");
     return;
   }
 
-  if (!storage.value) {
-    console.warn('No local DB to sync');
-    return;
-  }
-
-  if (!storageComments.value) {
+  if (!storage.value || !storageComments.value) {
     console.warn('No local DB to sync');
     return;
   }
@@ -211,7 +201,7 @@ const fetchData = () => {
 
   if (!storage.value) return;
 
-  // et pas un allDocs puisqu'il n'est pas nécessaire de charger tous les documents, mais seulement ceux que l'on veut afficher
+  // chargement des posts les plus likés
   storage.value.find({
     selector: {
       likes: { $gte: 0 }
@@ -227,17 +217,19 @@ const fetchData = () => {
       console.error('=> Erreur lors de la récupération des posts triés :', err);
     });
 
-  // COMMENTS A CHANGER
+
+  // chargement de tous les commentaires car on veut pouvoir facilement tous les afficher sous un post,
+  // pas comme les posts
   if (!storageComments.value) return;
-  storageComments.value.find({
-    selector: {
-      id_post: { $exists: true }
-    },
-    limit: $displayComments.value
+
+  storageComments.value.allDocs({
+    include_docs: true
   })
     .then((result: any) => {
-      console.log('=> Commentaires récupérés :', result.docs);
-      commentsData.value = result.docs.filter(c => !(c._id.startsWith("_design")));
+      commentsData.value = result.rows
+        .map(row => row.doc)
+        .filter(c => c && !c._id.startsWith("_design"));
+      console.log('=> Commentaires récupérés :', commentsData.value.length);
     })
     .catch((err: any) => {
       console.error('=> Erreur lors de la récupération des commentaires :', err);
@@ -257,8 +249,9 @@ const createDocument = function (doc: any) {
     })
 }
 
+
 // Modification d'un document
-const updateDocument = function (doc: any, i) {
+const updateDocument = function (doc: any, i: number) {
   doc.post_name = needle.value[i];
   storage.value
     .put(doc)
@@ -270,6 +263,7 @@ const updateDocument = function (doc: any, i) {
       console.log(err);
     })
 }
+
 
 // Suppression d'un document
 const deleteDocument = function (id: string, rev: string) {
@@ -284,6 +278,7 @@ const deleteDocument = function (id: string, rev: string) {
 }
 
 
+// factory de docs
 const generate200Docs = (count = 200) => {
   const words = ["léa", "inoé", "camilo", "yannis", "sarah", "tanguy", "dylan"];
 
@@ -299,6 +294,7 @@ const generate200Docs = (count = 200) => {
 };
 
 
+// fonction de recherche sur l'index qui est sur le nom du post (=doc)
 const search = (event: any) => {
   const value = event.target.value.trim();
 
@@ -317,14 +313,13 @@ const search = (event: any) => {
     .then((result: any) => {
       console.log('=> Données récupérées :', result.docs)
       postsData.value = result.docs;
-
     })
     .catch((error: any) => {
       console.error(error)
     })
 }
 
-
+// qd on like un post
 const handleLike = (doc: any) => {
   doc.likes++;
   storage.value
@@ -339,14 +334,21 @@ const handleLike = (doc: any) => {
 }
 
 
-// COMMENTAIRES
-const addComment = function (c: any, post_id: any) {
+// ajout d'un commentaire
+const addComment = function (post_id: any) {
   if (!storageComments.value) {
     console.warn("La DB Comments n'est pas prête !");
     return;
   }
 
-  c.id_post = post_id;
+  const c = {
+    id_post: post_id,
+    comment_content: "ceci est un super commentaire",
+    attributes: {
+      creation_date: new Date().toISOString()
+    }
+  };
+
   storageComments.value
     .post(c)
     .then(function (result: any) {
@@ -357,8 +359,9 @@ const addComment = function (c: any, post_id: any) {
     })
 }
 
-// Modification d'un document
-const updateComment = function (c: any, i: any) {
+
+// Modification d'un commentaire
+const updateComment = function (c: any, i: string) {
   c.comment_content = needleComment.value[i];
   storageComments.value
     .put(c)
@@ -371,7 +374,8 @@ const updateComment = function (c: any, i: any) {
     })
 }
 
-// Suppression d'un document
+
+// Suppression d'un commentaire
 const deleteComment = function (id: string, rev: string) {
   storageComments.value
     .remove(id, rev)
@@ -384,17 +388,64 @@ const deleteComment = function (id: string, rev: string) {
 }
 
 
-const getComments = (postId: any) => {
-  const commentsFiltered = commentsData.value.filter(a => a.id_post === postId)
-  return commentsFiltered;
+// Obtenir tous les commentaires d'un post
+const getAllComments = function (postId: string) {
+  return commentsData.value
+    .filter(c => c.id_post === postId)
+    .sort((a, b) =>
+      new Date(b.attributes.creation_date).getTime() - new Date(a.attributes.creation_date).getTime()
+    )
 }
 
-const selectImg = (event: any, post: Post) => {
+
+// Dernier commentaire d'un post
+const getLastComment = function (postId: string) {
+  const comments = getAllComments(postId);
+  // s'il n'y a pas de comms
+  if (comments.length <= 0) return;
+  return comments[0];
+}
+
+
+// charger 10 posts supplémentaires
+const changeDisplayPosts = () => {
+  $displayPosts.value += 10;
+  fetchData();
+}
+
+
+// retourne les commentaires à afficher (seulement dernier ou tous)
+const getCommentsToDisplay = function (postId: string) {
+  const allComments = getAllComments(postId);
+
+  // Si on veut voir tous les commentaires OU s'il n'y en a qu'un seul
+  if (showAllComments.value[postId] || allComments.length <= 1) {
+    return allComments;
+  }
+
+  // sinon, afficher seulement le dernier
+  const lastComment = getLastComment(postId);
+  return [lastComment];
+}
+
+
+// toggle l'affichage des commentaires (dernier ou tous)
+const toggleComments = function (postId: string) {
+  showAllComments.value[postId] = !showAllComments.value[postId];
+}
+
+
+// Ajouter une image
+const selectImg = function (event: any, post: Post) {
   const file = event.target.files[0];
   if (!file) return;
 
-  storage.value.putAttachment(post._id, file.name, post._rev, file, file.type)
+  if (!file.type.startsWith('image/')) {
+    alert('Veuillez sélectionner une image');
+    return;
+  }
 
+  storage.value.putAttachment(post._id, file.name, post._rev, file, file.type)
     .then((result: any) => {
       console.log('Image attachée avec succès:', result);
       fetchData();
@@ -404,20 +455,34 @@ const selectImg = (event: any, post: Post) => {
     });
 }
 
-const deleteImg = (event: any, post: Post) => {
 
-}
+// Supprimer une image
+const deleteImg = function (post: Post, attachmentName: string) {
+  storage.value.removeAttachment(post._id, attachmentName, post._rev)
+    .then((result: any) => {
+      console.log('Image supprimée avec succès:', result);
+      fetchData();
+    })
+    .catch((err: any) => {
+      console.error("Erreur suppression média :", err);
+    });
+};
 
-const changeDisplayPosts = () => {
-  $displayPosts.value += 10;
-}
 
-const changeDisplayComments = () => {
-  $displayComments.value += 10;
-}
+// Afficher image(s) attachée(s)
+const displayImage = (post: Post, attachName: string, imgElement: HTMLImageElement) => {
+  storage.value.getAttachment(post._id, attachName)
+    .then((blob: Blob) => {
+      const url = URL.createObjectURL(blob);
+      imgElement.src = url;
+    })
+    .catch((err: any) => {
+      console.error("Erreur chargement image:", err);
+    });
+};
 
 
-
+// HTML
 </script>
 
 <template>
@@ -427,10 +492,10 @@ const changeDisplayComments = () => {
   <br>
   <button @click="createDocument(doc)">Nouveau Document</button>
   <button @click="generate200Docs()">Générer 200 documents</button>
-  <!-- <button @click="deleteAllDocs()">Supprimer tous les documents</button> -->
   <input type="text" placeholder="Search" @keyup.enter="search" class="search">
   <br>
   Nombre de post : {{ postsData.length }}
+
   <article v-for="(post, i) in postsData" v-bind:key="(post as any).id">
     <ul>
       <li>
@@ -447,35 +512,57 @@ const changeDisplayComments = () => {
 
         <br>
 
+
+        <!-- Ajouter une img -->
+        <br>
         <label for="img">Ajouter une image</label>
-        <input type="file" name="img" @change="selectImg($event, post)">
-        <button @click="deleteImg($event, post)">Supprimer l'image attachée</button>
+        <input type="file" name="img" accept="image/*" @change="selectImg($event, post)">
 
+
+        <!-- Affichage des images attachées -->
+        <div v-if="post._attachments && Object.keys(post._attachments).length > 0">
+          <h4>Image(s) :</h4>
+          <div v-for="(attachment, name) in post._attachments" :key="name">
+            <img :ref="(el) => el && displayImage(post, name, el)" />
+            <br>
+
+            <!-- supprimer img -->
+            <button @click="deleteImg(post, name)">Supprimer l'image</button>
+          </div>
+        </div>
+
+
+        <!-- Commentaires -->
         <br>
-        <button @click="addComment(comment, post._id)">Nouveau commentaire</button>
+        <button @click="addComment(post._id)">Nouveau commentaire</button>
         <br>
 
-        <article v-for="(comment, i) in getComments(post._id)" v-bind:key="(comment as any)._id">
+        <p>Commentaires ({{ getAllComments(post._id).length }})</p>
 
+        <!-- gère affichage de 1 ou tous les commentaires -->
+        <article v-for="(comment, j) in getCommentsToDisplay(post._id)" v-bind:key="comment._id">
           <ul>
             <li>
-              <h2>{{ comment.comment_content }}</h2>
+              <h3>{{ comment.comment_content }}</h3>
 
               <label for="needleComments">Editer le commentaire</label>
-              <input type="text" name="needleComments" v-model="needleComment[i]"
-                @keyup.enter="updateComment(comment, i)">
+              <input type="text" name="needleComments" v-model="needleComment[comment._id]"
+                @keyup.enter="updateComment(comment, comment._id)">
               <button @click="deleteComment(comment._id, comment._rev)">Supprimer le commentaire</button>
             </li>
           </ul>
-
         </article>
 
-        <button @click="changeDisplayComments()">Charger plus de commentaires</button>
+        <!-- load tous les commentaires/ un seulement -->
+        <button v-if="getAllComments(post._id).length > 1" @click="toggleComments(post._id)">
+          {{ showAllComments[post._id] ? 'Voir moins' : 'Voir tous les commentaires' }}
+        </button>
 
       </li>
     </ul>
   </article>
-  
-      <button @click="changeDisplayPosts()">Charger plus de posts</button>
+
+  <!-- load 10 posts de plus -->
+  <button @click="changeDisplayPosts()">Charger plus de posts</button>
 
 </template>
