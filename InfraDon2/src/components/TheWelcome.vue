@@ -62,6 +62,7 @@ const doc = {
 }
 
 
+// Initialisation des 2 databases
 const initDatabase = () => {
   console.log('=> Connexion à la base de données');
 
@@ -106,6 +107,7 @@ const initDatabase = () => {
       if (!offline.value) startSync();
     });
 
+
   // RÉPLICATION COMMENTS
   storageComments.value
     .replicate
@@ -118,6 +120,7 @@ const initDatabase = () => {
 }
 
 
+// démarrer synchronisation
 const startSync = () => {
   if (syncRunning) {
     console.log("sync already running");
@@ -161,6 +164,7 @@ const startSync = () => {
 }
 
 
+// arrêter synchronisation
 const stopSync = () => {
   if (!syncRunning) return;
 
@@ -184,6 +188,7 @@ const stopSync = () => {
 }
 
 
+// gestion du offline ou online
 const handleChange = () => {
   if (!offline.value) {
     console.log("Mode ONLINE → lancement du sync");
@@ -278,7 +283,7 @@ const deleteDocument = function (id: string, rev: string) {
 }
 
 
-// factory de docs
+// Factory de docs
 const generate200Docs = (count = 200) => {
   const words = ["léa", "inoé", "camilo", "yannis", "sarah", "tanguy", "dylan"];
 
@@ -319,7 +324,8 @@ const search = (event: any) => {
     })
 }
 
-// qd on like un post
+
+// Quand on like un post
 const handleLike = (doc: any) => {
   doc.likes++;
   storage.value
@@ -334,7 +340,7 @@ const handleLike = (doc: any) => {
 }
 
 
-// ajout d'un commentaire
+// Ajout d'un commentaire
 const addComment = function (post_id: any) {
   if (!storageComments.value) {
     console.warn("La DB Comments n'est pas prête !");
@@ -414,7 +420,7 @@ const changeDisplayPosts = () => {
 }
 
 
-// retourne les commentaires à afficher (seulement dernier ou tous)
+// Retourne les commentaires à afficher (seulement dernier ou tous)
 const getCommentsToDisplay = function (postId: string) {
   const allComments = getAllComments(postId);
 
@@ -429,7 +435,7 @@ const getCommentsToDisplay = function (postId: string) {
 }
 
 
-// toggle l'affichage des commentaires (dernier ou tous)
+// Toggle l'affichage des commentaires (dernier ou tous)
 const toggleComments = function (postId: string) {
   showAllComments.value[postId] = !showAllComments.value[postId];
 }
